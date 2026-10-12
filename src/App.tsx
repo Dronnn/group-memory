@@ -1,8 +1,8 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import { ApiError, errorText, initializeTransport, requestId, rpc } from './api';
+import { ApiError, errorText, initializeTransport, requestId, rpc, setGroup } from './api';
 import { ContentBody } from './components/ContentBody';
 import { Icon } from './components/Icon';
-import type { Bootstrap, Draft, Filters, Memory, Revision } from './types';
+import type { Bootstrap, Draft, Filters, GroupRef, Memory, Revision } from './types';
 import {
   attachmentMeta,
   draftFrom,
@@ -50,9 +50,12 @@ function useTelegramChrome(route: Route, onBack: () => void, dirty: boolean) {
 }
 
 export default function App() {
+  const [locator] = useState(() => parseLocator(window.Telegram?.WebApp?.initDataUnsafe?.start_param));
+  const groupId = useRef<string | undefined>(locator.group);
+  const [choices, setChoices] = useState<GroupRef[]>([]);
+  const [picking, setPicking] = useState(false);
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [route, setRoute] = useState<Route>(() => {
-    const locator = parseLocator(window.Telegram?.WebApp?.initDataUnsafe?.start_param);
     if (locator.mode === 'detail' && 'id' in locator) return { name: 'detail', id: locator.id };
     if (locator.mode === 'edit' && 'id' in locator) return { name: 'edit', id: locator.id };
     if (locator.mode === 'new') return { name: 'edit' };
@@ -88,7 +91,7 @@ export default function App() {
     const text = errorText(error);
     setBanner(text);
     window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.('error');
-    if (error instanceof ApiError && (error.code === 'ACCESS_DENIED' || error.code === 'SESSION_REQUIRED' || error.code === 'CONFIG_REQUIRED')) {
+    if (error instanceof ApiError && (error.code === 'ACCESS_DENIED' || error.code === 'SESSION_REQUIRED' || error.code === 'NO_GROUPS')) {
       setFatal(text);
     }
   });
@@ -98,6 +101,19 @@ export default function App() {
     setFatal(null);
     try {
       await initializeTransport();
+      // Opened without a group link (bot menu, private chat): offer the user's groups.
+      if (!groupId.current) {
+        const { groups } = await rpc<{ groups: GroupRef[] }>('groups');
+        setChoices(groups);
+        if (!groups.length) throw new ApiError('NO_GROUPS', '');
+        if (groups.length > 1) {
+          setPicking(true);
+          return;
+        }
+        groupId.current = groups[0].id;
+      }
+      setGroup(groupId.current);
+      setPicking(false);
       const data = await rpc<Bootstrap>('bootstrap');
       setBoot(data);
       setBanner(null);
@@ -335,6 +351,15 @@ export default function App() {
     }
   }
 
+  function chooseGroup(id?: string) {
+    groupId.current = id;
+    setBoot(null);
+    setItems([]);
+    setItem(null);
+    setRoute({ name: 'list' });
+    void loadBootstrap();
+  }
+
   if (fatal) {
     return (
       <div className="app">
@@ -350,6 +375,26 @@ export default function App() {
     );
   }
 
+  if (picking) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <strong>Выберите группу</strong>
+            <span>У каждой группы своя память</span>
+          </div>
+        </header>
+        <div className="list">
+          {choices.map(group => (
+            <button key={group.id} type="button" className="item" onClick={() => chooseGroup(group.id)}>
+              <h2>{group.title}</h2>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -358,6 +403,11 @@ export default function App() {
           <span>{boot ? `Вы: ${boot.actor.name}` : 'Загрузка…'}</span>
         </div>
         <div className="row">
+          {route.name === 'list' && choices.length > 1 && (
+            <button type="button" className="btn" onClick={() => chooseGroup()}>
+              Группы
+            </button>
+          )}
           {route.name !== 'list' && (
             <button type="button" className="icon-btn" aria-label="Назад" onClick={goBack}>
               <Icon name="back" />

@@ -4,6 +4,7 @@ export function createMemoryStore() {
   const memories = new Map();
   let nextId = 1;
   const temps = new Map();
+  const members = new Map();
 
   const decode = row => (row ? { ...row, data: structuredClone(row.data) } : null);
 
@@ -22,6 +23,23 @@ export function createMemoryStore() {
     async getGroup(id) {
       const group = groups.get(id);
       return group ? { ...group } : null;
+    },
+    async getGroupByChat(chatId) {
+      for (const group of groups.values()) if (group.chatId === chatId) return { ...group };
+      return null;
+    },
+    async touchMember(groupId, userId, at) {
+      members.set(`${groupId}:${userId}`, { groupId, userId, seenAt: at });
+    },
+    async removeMember(groupId, userId) {
+      members.delete(`${groupId}:${userId}`);
+    },
+    async groupsOfUser(userId, limit) {
+      return [...members.values()]
+        .filter(row => row.userId === userId && groups.has(row.groupId))
+        .sort((a, b) => b.seenAt - a.seenAt)
+        .slice(0, limit)
+        .map(row => ({ ...groups.get(row.groupId) }));
     },
     async migrateGroup(id, oldId, newId) {
       const group = groups.get(id);

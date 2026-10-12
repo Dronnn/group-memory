@@ -2,11 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.frontend.json)
-[![Tests](https://img.shields.io/badge/tests-69%20passing-brightgreen)](test)
+[![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)](test)
 
-**A shared memory for a Telegram group.** The good stuff in a busy chat — explanations, code
-snippets, links, decisions, screenshots — usually drowns in the scrollback. Group Memory gives the
-group one deliberately-curated, searchable collection: save a message with a reply, browse and edit
+**A shared memory for Telegram groups.** The good stuff in a busy chat — explanations, code
+snippets, links, decisions, screenshots — usually drowns in the scrollback. Group Memory gives every
+group it is added to its own deliberately-curated, searchable collection: save a message with a reply, browse and edit
 it together in a polished Mini App, and never lose an answer worth keeping.
 
 Built end-to-end on Telegram's serverless platform: bot handlers and a database in `tgcloud/`, a
@@ -23,7 +23,16 @@ React + TypeScript Mini App in `src/`, no servers to run and no npm packages in 
 - Nothing else is ever archived. Ordinary conversation is not read, indexed or sent anywhere, and
   there is no LLM dependency — saving, titles, tags and search are deterministic.
 
+**Works right in the chat**
+- `/memory` opens a button panel — Recent, Search, Tags, Trash, Add, App — that navigates inside
+  one message instead of flooding the group. Lists page with «Ещё»; tags open their items.
+- Tap an item (or `/show ID`) to read it in full in the chat: text, annotation, link, tags, author,
+  with Edit / Trash / Restore buttons and a link to the Mini App.
+- Text input works with group privacy mode on: prompts ask for a reply to the bot's message.
+
 **The collection belongs to the group**
+- Add the bot to any group as an administrator and that group gets its own memory. Groups never
+  see each other's items; every request is checked against membership in that specific group.
 - Every current member has the same rights: create, read, search, edit anyone's item, tag, pin,
   trash, restore, read history, export. Authorship is attribution, never ownership.
 - Optimistic concurrency: if someone edited first, you get a conflict, see the latest version, and
@@ -64,7 +73,13 @@ Mini App ──POST /api/memory (initData)──▶ endpoints/memory.js ┘     
 ```
 
 - **One authorization layer** (`lib/auth.js`) is used by handlers and endpoints alike: actor from
-  trusted context, configured group, live membership via `getChatMember`, and bot-admin status.
+  trusted context, the requested group, live membership via `getChatMember`, and bot-admin status.
+- **Many groups, one deployment.** A group registers itself when the bot is added (or on its first
+  command) under a stable id `g<chat id digits>` that survives group → supergroup migration. Every
+  memory row is keyed by that id. The Mini App is not told which chat opened it, so every link the
+  bot posts carries the group (`startapp=g…_m_<id>`); opened from the bot menu, the Mini App offers
+  a picker of the user's groups. In a private chat, commands use the user's only group or ask which
+  one.
   Everything else — validation, search normalization, mutations, revisions, idempotency,
   formatting — lives in `lib/service.js`, so handlers and endpoints stay thin.
 - **One aggregate row per memory.** Current content, immutable history and applied request-ID
@@ -81,12 +96,12 @@ Mini App ──POST /api/memory (initData)──▶ endpoints/memory.js ┘     
 
 | Path | What it is |
 |---|---|
-| `tgcloud/schema.js` | Database schema: `memories` (aggregate + unique keys), `memory_groups`, `memory_temporary` |
+| `tgcloud/schema.js` | Database schema: `memories` (aggregate + unique keys), `memory_groups`, `memory_members` (who used which group, for the picker), `memory_temporary` |
 | `tgcloud/lib/` | `auth`, `service`, `store`, `search`, `validation`, `public`, `errors`, `commands`, `snapshot`, `bot`, runtimes |
 | `tgcloud/handlers/` | `message`, `callback_query`, `my_chat_member` update handlers |
 | `tgcloud/endpoints/memory.js` | Mini App RPC facade (`POST /api/memory`); identity only from `ctx.initData` |
 | `src/` | Mini App: `App.tsx`, transport (`api.ts`), components, styles, dev-only fixture transport |
-| `test/` | Node test-runner suites: service, bot flows, units — 69 tests |
+| `test/` | Node test-runner suites: service, bot flows, units — 86 tests |
 | `docs/contracts.md` | The RPC contract between the Mini App and the backend |
 | `docs/tgcloud-sdk.md` | Telegram Serverless SDK reference used by this project |
 | `docs/group-guide-ru.md` | A short Russian user guide, ready to post in the group |
@@ -96,7 +111,7 @@ Mini App ──POST /api/memory (initData)──▶ endpoints/memory.js ┘     
 ```bash
 npm install
 npm run dev        # Vite dev server with the dev-only fixture transport
-npm test           # 69 tests
+npm test           # 86 tests
 npm run typecheck  # strict TypeScript over src/
 npm run build      # typecheck + production bundle into dist/
 ```
@@ -113,10 +128,10 @@ app.
    (BotFather → your bot → *Serverless* → enable).
 2. A **CLI Access token** from the same menu (BotFather → bot → *Serverless* → *CLI Access*).
    This is not the bot token; it authorizes `tgcloud login`.
-3. The target group's numeric chat id (negative, e.g. `-1001234567890`).
-4. The bot added to the group **as an administrator**. The app needs no message-management rights,
-   but the Bot API only guarantees `getChatMember` answers about other users for administrators.
-5. Group privacy mode: leave the default **enabled** — the bot only needs addressed commands and
+3. The bot added to each group **as an administrator** — any number of groups, each with its own
+   memory. The app needs no message-management rights, but the Bot API only guarantees
+   `getChatMember` answers about other users for administrators.
+4. Group privacy mode: leave the default **enabled** — the bot only needs addressed commands and
    replies, which is exactly how saving works.
 
 ### First deployment
@@ -124,7 +139,7 @@ app.
 ```bash
 npm install
 npx tgcloud login           # paste the CLI Access token (interactive)
-# set initialChatId (and optionally botUsername) in tgcloud/lib/config.js
+# set botUsername in tgcloud/lib/config.js if you use your own bot
 npx tgcloud status          # local vs cloud diff
 npm run deploy              # build the Mini App and push modules + static site
 npx tgcloud migrate         # apply schema.js to the database (separate, explicit step)
@@ -140,14 +155,15 @@ prints the Mini App URL (`https://app<app_id>.tgcloud.ai/`); `/api/*` is reserve
 1. **Main Mini App**: BotFather → `/mybots` → your bot → *Bot Settings* → *Configure Mini App* →
    enable and set the deployed URL.
 2. **Menu button**: *Bot Settings* → *Menu Button* → same URL.
-3. **Commands** register themselves from the bot on the first `/start` (private and group scopes).
+3. **Commands** register themselves from the bot on its first command (private and group scopes).
    To do it manually, BotFather → *Edit Commands*:
 
    ```
    start - О боте и вход в память
    help - Короткая справка и примеры
    remember - Сохранить текст или выбранное сообщение
-   memory - Открыть общую память
+   memory - Меню памяти с кнопками
+   show - Показать запись по ID
    find - Найти по запросу
    recent - Последние записи
    tags - Теги и просмотр
@@ -166,10 +182,7 @@ Public deployment settings live in `tgcloud/lib/config.js` — no tokens, ever:
 
 ```js
 export const config = {
-  groupId: 'group_memory',   // stable internal id; keys all stored data
-  initialChatId: 0,          // negative chat id of the target group; 0 fails closed
-  groupTitle: 'Память чата', // fallback title until the real one is fetched
-  botUsername: '',           // without @; empty = resolved via getMe
+  botUsername: 'gangMemoryBot', // without @; empty = resolved via getMe
   limits: {
     title: 120,              // characters
     body: 20000,
@@ -202,7 +215,7 @@ in the Mini App bundle, or in logs.
 
 ## Testing
 
-`npm test` runs 69 tests on the Node test runner with an in-memory store and a fake Bot API:
+`npm test` runs 86 tests on the Node test runner with an in-memory store and a fake Bot API:
 
 - authorization matrix (creator/administrator/member, restricted + `is_member`, left/kicked),
   membership re-checks without caching, fail-closed behavior, bot-removal suspension;
@@ -212,7 +225,8 @@ in the Mini App bundle, or in logs.
   safety, stable cursor pagination with new items arriving;
 - validation limits and field-level errors, export pagination without file references;
 - attachment delivery states (sent / start required / unavailable) and the protected projections;
-- group scoping, chat migration, command parsing, pending input scoped per member and topic,
+- group registration and isolation between groups, the per-user group list, private-chat group
+  choice, chat migration, command parsing, pending input scoped per member and topic,
   confirmation callbacks scoped to actor/item/topic with expiry, snapshot extraction for text,
   photo, document, unsupported media and anonymous senders.
 
@@ -236,7 +250,8 @@ state, and every other group's data. Import is out of scope.
 
 ## Limitations (by design)
 
-- One configured group; this is not a multi-group SaaS.
+- The Mini App picker and private-chat commands only know groups where the user has already used
+  the memory (a command in the group or a group link); Telegram offers no way to list a user's groups.
 - One selected message per save — no album or thread capture, no history import.
 - Text/caption, one photo, one document; other media types are explained, not archived.
 - Attachment availability depends on Telegram `file_id`s; a missing file never erases the memory.

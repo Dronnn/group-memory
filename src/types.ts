@@ -2,6 +2,7 @@ export type Person = { id: number; name: string };
 export type Entity = { type: string; offset: number; length: number; url?: string; language?: string };
 export type Memory = { id: number; displayId: string; groupId: string; title: string; body: string; annotation: string; url: string; tags: string[]; type: 'text'|'link'|'photo'|'document'; pinned: boolean; creator: Person; editor: Person; createdAt: number; updatedAt: number; version: number; trashed: boolean; deletedBy?: Person; source?: {messageId:number;chatId:string;date:number;authorName:string;authorId?:number;topicId?:number;url?:string}; attachment?: {kind:'photo'|'document';fileName?:string;mimeType?:string;size?:number;width?:number;height?:number;available?:boolean}; entities?:Entity[] };
 export type Revision = {version:number;editor:Person;at:number;event:string;snapshot:Memory};
+export type GroupRef = {id:string;title:string};
 export type Bootstrap = {group:{id:string;title:string};actor:Person;botUsername:string;limits:Record<string,number>};
 export type Page<T> = {items:T[];nextCursor:string|null};
 export type Filters = {query:string;tag:string;type:string;view:'active'|'pinned'|'trash';savedByMe:boolean;sort:'newest'|'oldest'|'updated'};

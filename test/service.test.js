@@ -6,12 +6,15 @@ import { createService } from '../tgcloud/lib/service.js';
 import { config as baseConfig } from '../tgcloud/lib/config.js';
 
 export const GROUP_CHAT = -1001234567890;
+export const GROUP = 'g1001234567890';
+export const OTHER_CHAT = -1009999999999;
+export const OTHER = 'g1009999999999';
 export const ANNA = { id: 1, first_name: 'Анна' };
 export const IGOR = { id: 2, first_name: 'Игорь' };
 export const OUTSIDER = { id: 3, first_name: 'Чужой' };
 
-/** Builds service around the in-memory store and fake Bot API. */
-export function setup({ members, apiOptions = {}, now = () => Date.now() } = {}) {
+/** Builds service around the in-memory store and fake Bot API; calls default to GROUP. */
+export async function setup({ members, apiOptions = {}, now = () => Date.now() } = {}) {
   const store = createMemoryStore();
   const api = createFakeApi({
     members: members || {
@@ -20,13 +23,15 @@ export function setup({ members, apiOptions = {}, now = () => Date.now() } = {})
     },
     ...apiOptions,
   });
-  const config = {
-    ...baseConfig,
-    initialChatId: GROUP_CHAT,
-    botUsername: 'group_memory_bot',
+  const config = { ...baseConfig, botUsername: 'group_memory_bot' };
+  const raw = createService({ store, api, config, now });
+  await raw.registerChat({ id: GROUP_CHAT, type: 'supergroup', title: 'Учебная группа' });
+  const service = {
+    ...raw,
+    execute: (action, input = {}, actor) => raw.execute(action, action === 'groups' ? input : { group: GROUP, ...input }, actor),
+    saveSnapshot: (snapshot, actor, rid, group = GROUP) => raw.saveSnapshot(snapshot, actor, rid, group),
   };
-  const service = createService({ store, api, config, now });
-  return { store, api, config, service, now };
+  return { store, api, config, service, raw, now };
 }
 
 export const requestInput = (body, extra = {}) => ({ requestId: 'req-00000001', body, ...extra });
@@ -45,9 +50,9 @@ export function isAppError(code) {
 }
 
 test('bootstrap returns group, actor and limits for a member', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const data = await service.execute('bootstrap', {}, ANNA);
-  assert.equal(data.group.id, 'group_memory');
+  assert.equal(data.group.id, GROUP);
   assert.equal(data.group.title, 'Учебная группа');
   assert.equal(data.actor.name, 'Анна');
   assert.equal(data.botUsername, 'group_memory_bot');
@@ -65,7 +70,7 @@ test('membership statuses decide access', async () => {
     ['kicked', false],
   ];
   for (const [status, allowed, extra = {}] of statuses) {
-    const { service, api } = setup();
+    const { service, api } = await setup();
     api.members[`${GROUP_CHAT}:${ANNA.id}`] = { status, ...extra };
     const result = service.execute('bootstrap', {}, ANNA);
     if (allowed) await result;
@@ -74,33 +79,33 @@ test('membership statuses decide access', async () => {
 });
 
 test('unknown or unverifiable membership fails closed', async () => {
-  const failed = setup({ apiOptions: { memberError: Object.assign(new Error('Bad Gateway'), { name: 'BotApiError', code: 502 }) } });
+  const failed = await setup({ apiOptions: { memberError: Object.assign(new Error('Bad Gateway'), { name: 'BotApiError', code: 502 }) } });
   await assert.rejects(failed.service.execute('list', {}, ANNA), isAppError('AUTH_UNAVAILABLE'));
 
-  const missing = setup();
+  const missing = await setup();
   await assert.rejects(missing.service.execute('list', {}, OUTSIDER), isAppError('ACCESS_DENIED'));
 });
 
 test('bot must be able to verify membership', async () => {
-  const notAdmin = setup({ apiOptions: { botStatus: 'member' } });
+  const notAdmin = await setup({ apiOptions: { botStatus: 'member' } });
   await assert.rejects(notAdmin.service.execute('bootstrap', {}, ANNA), isAppError('AUTH_UNAVAILABLE'));
 
-  const botGone = setup({
+  const botGone = await setup({
     apiOptions: { botMemberError: Object.assign(new Error('Bad Request: chat not found'), { name: 'BotApiError', code: 400 }) },
   });
   await assert.rejects(botGone.service.execute('bootstrap', {}, ANNA), isAppError('AUTH_UNAVAILABLE'));
 });
 
 test('removal of the bot suspends access without touching data', async () => {
-  const { service, store } = setup();
+  const { service, store } = await setup();
   const item = await createItem(service, ANNA, { body: 'Важная договорённость' });
-  await service.botMembership(GROUP_CHAT, 'kicked');
+  await service.botMembership({ id: GROUP_CHAT, type: 'supergroup' }, 'kicked');
   await assert.rejects(service.execute('read', { id: item.id }, ANNA), isAppError('AUTH_UNAVAILABLE'));
-  assert.ok(await store.get('group_memory', item.id));
+  assert.ok(await store.get(GROUP, item.id));
 });
 
 test('every action rechecks membership without a positive cache', async () => {
-  const { service, api } = setup();
+  const { service, api } = await setup();
   const item = await createItem(service, ANNA, { body: 'Заметка' });
   await service.execute('read', { id: item.id }, ANNA);
   api.members[`${GROUP_CHAT}:${ANNA.id}`] = { status: 'left' };
@@ -109,7 +114,7 @@ test('every action rechecks membership without a positive cache', async () => {
 });
 
 test('non-members are denied for all protected actions', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Заметка' });
   const actions = [
     ['bootstrap', {}],
@@ -130,17 +135,54 @@ test('non-members are denied for all protected actions', async () => {
   }
 });
 
-test('private chat reaches the same collection, other chats do not', async () => {
-  const { service } = setup();
-  const item = await createItem(service, ANNA, { body: 'Заметка' });
-  await service.checkConversation(ANNA.id, ANNA);
-  await assert.rejects(service.checkConversation(-100777, ANNA), isAppError('ACCESS_DENIED'));
-  await assert.rejects(service.checkConversation(ANNA.id, OUTSIDER), isAppError('ACCESS_DENIED'));
-  assert.ok(item.id);
+test('any group or supergroup registers itself, other chats do not', async () => {
+  const { raw, store } = await setup();
+  assert.equal(await raw.registerChat({ id: ANNA.id, type: 'private' }), null);
+  assert.equal(await raw.registerChat({ id: -100777, type: 'channel' }), null);
+  const basic = await raw.registerChat({ id: -4242, type: 'group', title: 'Маленькая группа' });
+  assert.equal(basic.id, 'g4242');
+  assert.equal((await raw.registerChat({ id: -4242, type: 'group', title: 'Другое имя' })).id, 'g4242');
+  await raw.botMembership({ id: OTHER_CHAT, type: 'supergroup', title: 'Соседи' }, 'administrator');
+  const other = await store.getGroup(OTHER);
+  assert.equal(other.chatId, OTHER_CHAT);
+  assert.equal(other.botStatus, 'administrator');
+  await raw.botMembership({ id: -555, type: 'supergroup' }, 'left');
+  assert.equal(await store.getGroupByChat(-555), null);
+});
+
+test('groups are isolated from each other', async () => {
+  const { raw, service, api } = await setup();
+  await raw.registerChat({ id: OTHER_CHAT, type: 'supergroup', title: 'Соседи' });
+  api.members[`${OTHER_CHAT}:${IGOR.id}`] = { status: 'left' };
+  const ours = await createItem(service, ANNA, { body: 'Наша тайна' });
+  const theirs = (await raw.execute('create', { group: OTHER, ...requestInput('Соседская запись', { requestId: 'req-00000002' }) }, ANNA)).item;
+  assert.equal(theirs.groupId, OTHER);
+  assert.deepEqual((await service.execute('list', {}, ANNA)).items.map(i => i.body), ['Наша тайна']);
+  assert.deepEqual((await raw.execute('list', { group: OTHER }, ANNA)).items.map(i => i.body), ['Соседская запись']);
+  assert.equal((await raw.execute('list', { group: OTHER, query: 'тайна' }, ANNA)).items.length, 0);
+  await assert.rejects(raw.execute('read', { group: OTHER, id: ours.id }, ANNA), isAppError('NOT_FOUND'));
+  await assert.rejects(raw.execute('list', { group: OTHER }, IGOR), isAppError('ACCESS_DENIED'));
+  await assert.rejects(raw.execute('list', { group: 'g42' }, ANNA), isAppError('ACCESS_DENIED'));
+});
+
+test('groups lists only the groups where the user is still a member', async () => {
+  const { raw, service, api } = await setup();
+  await raw.registerChat({ id: OTHER_CHAT, type: 'supergroup', title: 'Соседи' });
+  assert.deepEqual((await service.execute('groups', {}, ANNA)).groups, []);
+  await service.execute('bootstrap', {}, ANNA);
+  await raw.execute('bootstrap', { group: OTHER }, ANNA);
+  const both = (await service.execute('groups', {}, ANNA)).groups.map(g => g.id).sort();
+  assert.deepEqual(both, [GROUP, OTHER].sort());
+  api.members[`${OTHER_CHAT}:${ANNA.id}`] = { status: 'left' };
+  assert.deepEqual((await service.execute('groups', {}, ANNA)).groups.map(g => g.id), [GROUP]);
+  delete api.members[`${OTHER_CHAT}:${ANNA.id}`];
+  // A definite non-member is forgotten, so the group stays hidden until used again.
+  assert.deepEqual((await service.execute('groups', {}, ANNA)).groups.map(g => g.id), [GROUP]);
+  assert.deepEqual((await service.execute('groups', {}, OUTSIDER)).groups, []);
 });
 
 test('create is idempotent per request id', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const first = await service.execute('create', requestInput('Одинаковый запрос'), ANNA);
   const second = await service.execute('create', requestInput('Одинаковый запрос'), ANNA);
   assert.equal(first.duplicate, false);
@@ -151,7 +193,7 @@ test('create is idempotent per request id', async () => {
 });
 
 test('saving the same source message converges on one memory', async () => {
-  const { service, store } = setup();
+  const { service, store } = await setup();
   const snapshot = {
     body: 'Сохранённое сообщение',
     annotation: '',
@@ -164,11 +206,11 @@ test('saving the same source message converges on one memory', async () => {
   ]);
   assert.equal(a.item.id, b.item.id);
   assert.equal(a.duplicate || b.duplicate, true);
-  assert.equal((await store.list('group_memory', { view: 'active', limit: 10, terms: [] })).length, 1);
+  assert.equal((await store.list(GROUP, { view: 'active', limit: 10, terms: [] })).length, 1);
 });
 
 test('saving a trashed source returns the trashed memory for restoration', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const snapshot = {
     body: 'Повторное сохранение',
     source: { messageId: 77, chatId: GROUP_CHAT, date: 1, authorName: 'Игорь' },
@@ -182,7 +224,7 @@ test('saving a trashed source returns the trashed memory for restoration', async
 });
 
 test('creator is the saver, source keeps the original author', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const saved = await service.saveSnapshot(
     {
       body: 'Как настроить деплой',
@@ -199,7 +241,7 @@ test('creator is the saver, source keeps the original author', async () => {
 });
 
 test('external create cannot inject source, attachment or entities', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   for (const extra of [
     { source: { messageId: 1, chatId: GROUP_CHAT, date: 1, authorName: 'X' } },
     { attachment: { kind: 'document', fileId: 'secret' } },
@@ -210,7 +252,7 @@ test('external create cannot inject source, attachment or entities', async () =>
 });
 
 test('validation limits are enforced with field details', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const cases = [
     [{ title: 'x'.repeat(121), body: 'текст' }, 'title'],
     [{ body: 'x'.repeat(20001) }, 'body'],
@@ -238,7 +280,7 @@ test('validation limits are enforced with field details', async () => {
 });
 
 test('search matches Cyrillic and Latin case-insensitively and combines filters', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const deploy = await createItem(service, ANNA, {
     body: 'Как настроить деплой приложения\n```js\nnpm run deploy\n```',
     tags: ['deploy', 'практика'],
@@ -268,7 +310,7 @@ test('search matches Cyrillic and Latin case-insensitively and combines filters'
 });
 
 test('query punctuation is treated as separators, never as wildcards', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Как настроить деплой приложения' });
   const percent = await service.execute('list', { query: '%' }, ANNA);
   assert.equal(percent.items.length, 0);
@@ -280,7 +322,7 @@ test('query punctuation is treated as separators, never as wildcards', async () 
 
 test('pagination is stable when new items arrive', async () => {
   let time = 1_000_000;
-  const { service } = setup({ now: () => (time += 1000) });
+  const { service } = await setup({ now: () => (time += 1000) });
   const first = await service.execute('create', { requestId: 'req-00000020', body: 'Первая' }, ANNA);
   const second = await service.execute('create', { requestId: 'req-00000021', body: 'Вторая' }, ANNA);
   const page1 = await service.execute('list', { pageSize: 1 }, ANNA);
@@ -296,7 +338,7 @@ test('pagination is stable when new items arrive', async () => {
 
 test('sorting by oldest and by recently updated stays stable', async () => {
   let time = 5_000_000;
-  const { service } = setup({ now: () => (time += 1000) });
+  const { service } = await setup({ now: () => (time += 1000) });
   const a = (await service.execute('create', { requestId: 'req-00000030', body: 'A' }, ANNA)).item;
   const b = (await service.execute('create', { requestId: 'req-00000031', body: 'B' }, ANNA)).item;
   const oldest = await service.execute('list', { sort: 'oldest' }, ANNA);
@@ -307,7 +349,7 @@ test('sorting by oldest and by recently updated stays stable', async () => {
 });
 
 test('conflicting updates are rejected and keep the draft possible', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Исходный текст' });
   const [first, second] = await Promise.allSettled([
     service.execute('update', { id: item.id, expectedVersion: item.version, requestId: 'req-00000040', body: 'Правка Анны' }, ANNA),
@@ -325,7 +367,7 @@ test('conflicting updates are rejected and keep the draft possible', async () =>
 });
 
 test('repeated mutations with one request id are no-ops', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Текст' });
   const done = await service.execute('update', { id: item.id, expectedVersion: 1, requestId: 'req-00000050', body: 'Новый текст' }, IGOR);
   assert.equal(done.item.version, 2);
@@ -336,7 +378,7 @@ test('repeated mutations with one request id are no-ops', async () => {
 });
 
 test('trash and restore preserve history and attribution', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Запись для корзины' });
   const updated = await service.execute('update', { id: item.id, expectedVersion: 1, requestId: 'req-00000051', body: 'Обновлённая' }, ANNA);
   const trashed = await service.execute('trash', { id: item.id, expectedVersion: updated.item.version, requestId: 'req-00000052' }, IGOR);
@@ -368,7 +410,7 @@ test('trash and restore preserve history and attribution', async () => {
 });
 
 test('pinning only affects the memory application', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Важное' });
   const pinned = await service.execute('pin', { id: item.id, expectedVersion: 1, requestId: 'req-00000056', pinned: true }, IGOR);
   assert.equal(pinned.item.pinned, true);
@@ -380,7 +422,7 @@ test('pinning only affects the memory application', async () => {
 });
 
 test('tags list covers active memories only', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const a = await createItem(service, ANNA, { body: 'A', tags: ['javascript', 'Практика'] }, 'req-00000058');
   await createItem(service, IGOR, { body: 'B', tags: ['javascript'] }, 'req-00000059');
   await service.execute('trash', { id: a.id, expectedVersion: 1, requestId: 'req-00000061' }, ANNA);
@@ -389,7 +431,7 @@ test('tags list covers active memories only', async () => {
 });
 
 test('export pages active memories without protected references', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const saved = await service.saveSnapshot(
     {
       body: 'С файлом',
@@ -416,7 +458,7 @@ test('export pages active memories without protected references', async () => {
 });
 
 test('export paginates with bounded pages', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   for (let i = 0; i < 3; i += 1) {
     await service.execute('create', { requestId: `req-0000007${i}`, body: `Запись ${i}` }, ANNA);
   }
@@ -430,7 +472,7 @@ test('export paginates with bounded pages', async () => {
 });
 
 test('history and tags are protected like item reads', async () => {
-  const { service } = setup();
+  const { service } = await setup();
   const item = await createItem(service, ANNA, { body: 'Заметка' });
   await assert.rejects(service.execute('history', { id: item.id }, OUTSIDER), isAppError('ACCESS_DENIED'));
   await assert.rejects(service.execute('tags', {}, OUTSIDER), isAppError('ACCESS_DENIED'));
@@ -438,7 +480,7 @@ test('history and tags are protected like item reads', async () => {
 });
 
 test('attachment delivery goes only to the requesting member', async () => {
-  const { service, api } = setup();
+  const { service, api } = await setup();
   const saved = await service.saveSnapshot(
     {
       body: 'Фото схемы',
@@ -458,7 +500,7 @@ test('attachment delivery goes only to the requesting member', async () => {
 });
 
 test('attachment start_required and unavailable states', async () => {
-  const { service, api } = setup();
+  const { service, api } = await setup();
   const saved = await service.saveSnapshot(
     { body: 'Документ', attachment: { kind: 'document', fileId: 'BQAC-1', fileName: 'a.txt' } },
     ANNA,
@@ -472,7 +514,7 @@ test('attachment start_required and unavailable states', async () => {
   };
   const needStart = await service.execute('attachment', { id: saved.item.id, requestId: 'req-00000084' }, IGOR);
   assert.equal(needStart.status, 'start_required');
-  assert.match(needStart.startUrl, /^https:\/\/t\.me\/group_memory_bot\?start=file_\d+$/);
+  assert.match(needStart.startUrl, /^https:\/\/t\.me\/group_memory_bot\?start=file_g1001234567890_\d+$/);
 
   api.sendDocument = async () => {
     const error = new Error('Bad Request: wrong file identifier/HTTP URL specified');
@@ -490,8 +532,8 @@ test('attachment start_required and unavailable states', async () => {
   assert.equal(none.status, 'unavailable');
 });
 
-test('memories are scoped to the configured group', async () => {
-  const { service, store } = setup();
+test('memories are scoped to their group', async () => {
+  const { service, store } = await setup();
   await createItem(service, ANNA, { body: 'Наша запись' });
   const time = Date.now();
   await store.insert('other_group', 'foreign', null, {
@@ -524,23 +566,20 @@ test('memories are scoped to the configured group', async () => {
 });
 
 test('chat migration preserves the collection and mapping', async () => {
-  const { service, store } = setup();
+  const { service, store } = await setup();
   const item = await createItem(service, ANNA, { body: 'До миграции' });
   const newChat = -1009999999999;
   await service.migrateChat(GROUP_CHAT, newChat);
-  const group = await store.getGroup('group_memory');
+  const group = await store.getGroup(GROUP);
   assert.equal(group.chatId, newChat);
   const readBack = await service.execute('read', { id: item.id }, ANNA);
   assert.equal(readBack.body, 'До миграции');
 });
 
-test('missing group configuration fails closed', async () => {
-  const store = createMemoryStore();
-  const api = createFakeApi({ members: { [`0:${ANNA.id}`]: { status: 'member' } } });
-  const service = createService({
-    store,
-    api,
-    config: { ...baseConfig, initialChatId: 0, botUsername: 'group_memory_bot' },
-  });
-  await assert.rejects(service.execute('bootstrap', {}, ANNA), isAppError('CONFIG_REQUIRED'));
+test('missing, malformed or unknown group fails closed', async () => {
+  const { raw } = await setup();
+  await assert.rejects(raw.execute('bootstrap', {}, ANNA), isAppError('VALIDATION'));
+  await assert.rejects(raw.execute('bootstrap', { group: 'group_memory' }, ANNA), isAppError('VALIDATION'));
+  await assert.rejects(raw.execute('bootstrap', { group: 'g42' }, ANNA), isAppError('ACCESS_DENIED'));
+  await assert.rejects(raw.saveSnapshot({ body: 'x' }, ANNA, 'req-00000001'), isAppError('VALIDATION'));
 });

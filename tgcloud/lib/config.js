@@ -1,11 +1,7 @@
 // Public deployment settings. Never put bot tokens or CLI credentials here.
 export const config = {
-  groupId: 'group_memory',
-  // Replace with the intended negative Telegram group/supergroup chat ID. Zero fails closed.
-  initialChatId: 0,
-  groupTitle: 'Память чата',
   // Without @. Configure the Main Mini App URL in BotFather after deploy.
-  botUsername: '',
+  botUsername: 'gangMemoryBot',
   limits: {
     title: 120,
     body: 20000,

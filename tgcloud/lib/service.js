@@ -59,11 +59,11 @@ function memoryFromRow(row) {
 }
 
 export function createService({ store, api, config, now = () => Date.now(), auth: authOverride }) {
-  const auth = authOverride || createAuth({ store, api, config });
+  const auth = authOverride || createAuth({ store, api, now });
   const limits = config.limits;
 
-  async function authorize(actor) {
-    return auth.requireMember(actor);
+  async function authorize(actor, groupId) {
+    return auth.requireMember(actor, groupId);
   }
 
   function buildCurrent({ groupId, fields, actor, source, attachment, entities, at, version = 1, pinned = false, trashed = false, deletedBy }) {
@@ -155,8 +155,12 @@ export function createService({ store, api, config, now = () => Date.now(), auth
   }
 
   const actions = {
-    async bootstrap(_input, actor) {
-      const { actor: me, group } = await authorize(actor);
+    async groups(_input, actor) {
+      return { groups: await auth.userGroups(actor) };
+    },
+
+    async bootstrap(input, actor) {
+      const { actor: me, group } = await authorize(actor, input.group);
       let botUsername = String(config.botUsername || '').replace(/^@/, '');
       if (!botUsername) {
         try {
@@ -174,7 +178,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async list(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const view = input.view || 'active';
       if (!['active', 'pinned', 'trash'].includes(view)) fail('VALIDATION', 'Некорректный вид', { fields: ['view'] });
       const sort = input.sort || 'newest';
@@ -212,7 +216,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async read(input, actor) {
-      const { group } = await authorize(actor);
+      const { group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const row = await store.get(group.id, id);
       if (!row) fail('NOT_FOUND', 'Запись не найдена');
@@ -220,7 +224,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async create(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const rid = requestId(input.requestId);
       // External RPC cannot inject source/attachment/entities — only saveSnapshot may.
       if (input.source != null || input.attachment != null || input.entities != null) {
@@ -237,7 +241,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async update(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const expected = positiveInt(input.expectedVersion, 'expectedVersion');
       const rid = requestId(input.requestId);
@@ -282,7 +286,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async pin(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const expected = positiveInt(input.expectedVersion, 'expectedVersion');
       const rid = requestId(input.requestId);
@@ -308,7 +312,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async trash(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const expected = positiveInt(input.expectedVersion, 'expectedVersion');
       const rid = requestId(input.requestId);
@@ -335,7 +339,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async restore(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const expected = positiveInt(input.expectedVersion, 'expectedVersion');
       const rid = requestId(input.requestId);
@@ -362,7 +366,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async history(input, actor) {
-      const { group } = await authorize(actor);
+      const { group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       const size = pageSize(input.pageSize, limits);
       const row = await store.get(group.id, id);
@@ -387,15 +391,15 @@ export function createService({ store, api, config, now = () => Date.now(), auth
       };
     },
 
-    async tags(_input, actor) {
-      const { group } = await authorize(actor);
+    async tags(input, actor) {
+      const { group } = await authorize(actor, input.group);
       const tags = await store.tags(group.id);
       const unique = [...new Set(tags)].sort((a, b) => a.localeCompare(b, 'ru'));
       return { tags: unique };
     },
 
     async export(input, actor) {
-      const { group } = await authorize(actor);
+      const { group } = await authorize(actor, input.group);
       if (!['json', 'markdown'].includes(input.format)) {
         fail('VALIDATION', 'Укажите format: json или markdown', { fields: ['format'] });
       }
@@ -417,7 +421,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     },
 
     async attachment(input, actor) {
-      const { actor: me, group } = await authorize(actor);
+      const { actor: me, group } = await authorize(actor, input.group);
       const id = positiveInt(input.id, 'id');
       requestId(input.requestId);
       const row = await store.get(group.id, id);
@@ -435,7 +439,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
           botUsername = '';
         }
       }
-      const startUrl = botUsername ? `https://t.me/${botUsername}?start=file_${id}` : undefined;
+      const startUrl = botUsername ? `https://t.me/${botUsername}?start=file_${group.id}_${id}` : undefined;
       try {
         if (attachment.kind === 'photo') {
           await api.sendPhoto({ chat_id: me.id, photo: attachment.fileId, caption: memory.title });
@@ -496,8 +500,8 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     return handler(input || {}, rawActor);
   }
 
-  async function saveSnapshot(snapshot, rawActor, rid) {
-    const { actor: me, group } = await authorize(rawActor);
+  async function saveSnapshot(snapshot, rawActor, rid, groupId) {
+    const { actor: me, group } = await authorize(rawActor, groupId);
     const request = requestId(rid);
     const fields = content(
       {
@@ -536,30 +540,15 @@ export function createService({ store, api, config, now = () => Date.now(), auth
 
   async function migrateChat(oldId, newId) {
     if (!Number.isSafeInteger(oldId) || !Number.isSafeInteger(newId)) return;
-    const group = await store.getGroup(config.groupId);
-    if (!group) {
-      // Migration can arrive before the first authorized request created the row.
-      if (config.initialChatId === oldId) await store.ensureGroup(config.groupId, newId, config.groupTitle);
-      return;
-    }
-    if (group.chatId === oldId) await store.migrateGroup(config.groupId, oldId, newId);
-    else if (group.chatId === newId) return;
+    const group = await store.getGroupByChat(oldId);
+    if (group) await store.migrateGroup(group.id, oldId, newId);
   }
 
-  async function botMembership(chatId, status) {
-    const group = await store.getGroup(config.groupId);
-    if (!group || group.chatId !== chatId) {
-      if (config.initialChatId === chatId) {
-        await store.ensureGroup(config.groupId, chatId, config.groupTitle);
-        await store.setBotStatus(config.groupId, chatId, status);
-      }
-      return;
-    }
-    await store.setBotStatus(group.id, chatId, status);
-  }
-
-  async function checkConversation(chatId, rawActor) {
-    return auth.requireConversation(chatId, rawActor);
+  async function botMembership(chat, status) {
+    const group = ['administrator', 'creator', 'member'].includes(status)
+      ? await auth.registerChat(chat)
+      : await store.getGroupByChat(chat?.id);
+    if (group) await store.setBotStatus(group.id, group.chatId, status);
   }
 
   return {
@@ -567,7 +556,7 @@ export function createService({ store, api, config, now = () => Date.now(), auth
     saveSnapshot,
     migrateChat,
     botMembership,
-    checkConversation,
+    registerChat: auth.registerChat,
     authorize,
   };
 }

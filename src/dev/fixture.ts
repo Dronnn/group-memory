@@ -9,7 +9,7 @@ const memories: Memory[] = [
   {
     id: 1,
     displayId: 'M-1',
-    groupId: 'group_memory',
+    groupId: 'g1001234567890',
     title: 'Нормализация Unicode',
     body: 'Для поиска используйте NFKC и toLowerCase.\n\n```js\ntext.normalize("NFKC").toLowerCase()\n```',
     annotation: '',
@@ -27,7 +27,7 @@ const memories: Memory[] = [
   {
     id: 2,
     displayId: 'M-2',
-    groupId: 'group_memory',
+    groupId: 'g1001234567890',
     title: 'Правило сохранения',
     body: 'Сохраняем только по явной команде. Обычную переписку бот не архивирует.',
     annotation: 'Договорились на созвоне',
@@ -64,7 +64,7 @@ const history: Record<number, Revision[]> = {
 };
 
 const bootstrap: Bootstrap = {
-  group: { id: 'group_memory', title: 'Студенты и разработчики' },
+  group: { id: 'g1001234567890', title: 'Студенты и разработчики' },
   actor,
   botUsername: 'group_memory_bot',
   limits: { title: 120, body: 20000, annotation: 20000, tags: 10, tag: 30, pageSize: 25 },
@@ -102,6 +102,7 @@ function list(input: Record<string, unknown>): Page<Memory> {
 export const fixtureTransport: Transport = async input => {
   await new Promise(resolve => setTimeout(resolve, 120));
   const action = String(input.action || '');
+  if (action === 'groups') return { groups: [bootstrap.group, { id: 'g1009999999999', title: 'Соседняя группа' }] } as never;
   if (action === 'bootstrap') return bootstrap as never;
   if (action === 'list') return list(input) as never;
   if (action === 'tags') {
@@ -116,7 +117,7 @@ export const fixtureTransport: Transport = async input => {
     const item: Memory = {
       id: seq,
       displayId: `M-${seq}`,
-      groupId: 'group_memory',
+      groupId: 'g1001234567890',
       title: String(input.title || String(input.body || '').split('\n')[0] || 'Заметка').slice(0, 120),
       body: String(input.body || ''),
       annotation: String(input.annotation || ''),
@@ -169,6 +170,6 @@ export const fixtureTransport: Transport = async input => {
   if (action === 'export') {
     return { items: memories.filter(m => !m.trashed), nextCursor: null, format: input.format } as never;
   }
-  if (action === 'attachment') return { status: 'start_required', startUrl: 'https://t.me/group_memory_bot?start=file_1' } as never;
+  if (action === 'attachment') return { status: 'start_required', startUrl: 'https://t.me/group_memory_bot?start=file_g1001234567890_1' } as never;
   throw new ApiError('VALIDATION', 'Неизвестное действие');
 };

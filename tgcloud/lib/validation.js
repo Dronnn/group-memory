@@ -19,6 +19,16 @@ export function actorIdentity(actor) {
   };
 }
 
+/** Stable group id derived from the chat id at registration: -1001234 -> g1001234. */
+export const groupIdOf = chatId => `g${-chatId}`;
+
+export function groupRef(value) {
+  if (typeof value !== 'string' || !/^g[1-9]\d{0,19}$/.test(value)) {
+    fail('VALIDATION', 'Не выбрана группа', { fields: ['group'] });
+  }
+  return value;
+}
+
 export function positiveInt(value, field) {
   if (!Number.isSafeInteger(value) || value < 1) fail('VALIDATION', 'Некорректное число', { fields: [field] });
   return value;

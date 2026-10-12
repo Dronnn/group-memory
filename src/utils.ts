@@ -10,11 +10,14 @@ export function safeUrl(value?: string): string | undefined {
   }
 }
 
+// start_param: g<n> | g<n>_m_<id> | g<n>_e_<id> | g<n>_new; anything else opens the group picker.
 export function parseLocator(value?: string) {
-  const m = /^(m|e)_([1-9]\d*)$/.exec(value || '');
-  if (m) return { mode: m[1] === 'e' ? 'edit' : 'detail', id: Number(m[2]) } as const;
-  if (value === 'new') return { mode: 'new' as const };
-  return { mode: 'list' as const };
+  const m = /^(g[1-9]\d*)(?:_(m|e)_([1-9]\d*)|_(new))?$/.exec(value || '');
+  if (!m) return { mode: 'list' as const };
+  const group = m[1];
+  if (m[2]) return { group, mode: m[2] === 'e' ? 'edit' : 'detail', id: Number(m[3]) } as const;
+  if (m[4]) return { group, mode: 'new' as const };
+  return { group, mode: 'list' as const };
 }
 
 export const formatDate = (value: number) =>

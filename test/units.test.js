@@ -117,8 +117,10 @@ test('parseId, appLink and conversationKey behave predictably', () => {
   assert.equal(parseId('abc'), null);
   assert.equal(appLink('group_memory_bot', 'm_5'), 'https://t.me/group_memory_bot?startapp=m_5');
   assert.equal(appLink('@group_memory_bot'), 'https://t.me/group_memory_bot?startapp=memory');
-  const message = { chat: { id: -100 }, message_thread_id: 4 };
+  const message = { chat: { id: -100 }, message_thread_id: 4, is_topic_message: true };
   assert.equal(conversationKey(message, 1), 'pending:-100:4:1');
+  // A reply thread in an ordinary supergroup is not a topic.
+  assert.equal(conversationKey({ chat: { id: -100 }, message_thread_id: 9 }, 1), 'pending:-100:0:1');
   assert.notEqual(conversationKey(message, 1), conversationKey(message, 2));
   assert.notEqual(conversationKey(message, 1), conversationKey({ chat: { id: -100 } }, 1));
 });

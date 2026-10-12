@@ -16,6 +16,7 @@ export function createFakeApi({
     sendDocument: 0,
     answerCallbackQuery: 0,
     setMyCommands: 0,
+    editMessageText: 0,
   };
   const sent = [];
   const sentCommands = [];
@@ -70,6 +71,11 @@ export function createFakeApi({
     async answerCallbackQuery(params) {
       calls.answerCallbackQuery += 1;
       sent.push({ method: 'answerCallbackQuery', ...params });
+      return true;
+    },
+    async editMessageText(params) {
+      calls.editMessageText += 1;
+      sent.push({ method: 'editMessageText', ...params });
       return true;
     },
     async setMyCommands(params) {

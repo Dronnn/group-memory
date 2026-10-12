@@ -2,6 +2,7 @@
 // There are deliberately no transactions or read-then-write side tables for history.
 export function createStore(db) {
   const decode = row => row ? { ...row, data: JSON.parse(row.aggregate) } : null;
+  const group = row => row ? {id:row.id,chatId:row.chat_id,title:row.title,botStatus:row.bot_status} : null;
   const bind = values => Object.fromEntries(Object.entries(values).map(([k,v]) => [':' + k, v]));
   function columns(groupId, data) {
     const m = data.current;
@@ -15,7 +16,11 @@ export function createStore(db) {
       );
       return this.getGroup(id);
     },
-    async getGroup(id) { const row = await db.get('SELECT * FROM memory_groups WHERE id=:id', bind({id})); return row && {id:row.id,chatId:row.chat_id,title:row.title,botStatus:row.bot_status}; },
+    async getGroup(id) { return group(await db.get('SELECT * FROM memory_groups WHERE id=:id', bind({id}))); },
+    async getGroupByChat(chatId) { return group(await db.get('SELECT * FROM memory_groups WHERE chat_id=:chatId LIMIT 1', bind({chatId}))); },
+    async touchMember(groupId, userId, at) { await db.run('INSERT INTO memory_members (group_id,user_id,seen_at) VALUES (:groupId,:userId,:at) ON CONFLICT(group_id,user_id) DO UPDATE SET seen_at=:at', bind({groupId,userId,at})); },
+    async removeMember(groupId, userId) { await db.run('DELETE FROM memory_members WHERE group_id=:groupId AND user_id=:userId', bind({groupId,userId})); },
+    async groupsOfUser(userId, limit) { return (await db.all('SELECT g.* FROM memory_members m JOIN memory_groups g ON g.id=m.group_id WHERE m.user_id=:userId ORDER BY m.seen_at DESC LIMIT :limit', bind({userId,limit}))).map(group); },
     async migrateGroup(id, oldId, newId) { return db.run('UPDATE memory_groups SET chat_id=:newId WHERE id=:id AND chat_id=:oldId', bind({id,oldId,newId})); },
     async setBotStatus(id, chatId, status) { return db.run('UPDATE memory_groups SET bot_status=:status WHERE id=:id AND chat_id=:chatId', bind({id,chatId,status})); },
     async get(groupId,id) { return decode(await db.get('SELECT * FROM memories WHERE group_id=:groupId AND id=:id',bind({groupId,id}))); },

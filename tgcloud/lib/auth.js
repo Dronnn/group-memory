@@ -1,27 +1,29 @@
 import { fail } from './errors.js';
-import { actorIdentity } from './validation.js';
+import { actorIdentity, groupIdOf, groupRef } from './validation.js';
 
 function isBotApiError(error) {
   return Boolean(error && (error.name === 'BotApiError' || error.method || error.description));
 }
 
 const MEMBER_STATUSES = new Set(['creator', 'administrator', 'member']);
+const GROUP_CHATS = new Set(['group', 'supergroup']);
+const PICKER_LIMIT = 10;
 
 /**
  * Membership and bot-admin checks for every protected operation.
  * No positive membership cache — callers must invoke this on each request.
  */
-export function createAuth({ store, api, config }) {
-  async function resolveGroup() {
-    if (!Number.isSafeInteger(config.initialChatId) || config.initialChatId === 0) {
-      fail('CONFIG_REQUIRED', 'Укажите идентификатор группы в конфигурации');
-    }
-    let group = await store.getGroup(config.groupId);
-    if (!group) {
-      group = await store.ensureGroup(config.groupId, config.initialChatId, config.groupTitle);
-    }
-    if (!group?.chatId) fail('CONFIG_REQUIRED', 'Группа ещё не подключена');
+export function createAuth({ store, api, now = () => Date.now() }) {
+  async function resolveGroup(groupId) {
+    const group = await store.getGroup(groupRef(groupId));
+    if (!group?.chatId) fail('ACCESS_DENIED', 'Доступ только для участников группы');
     return group;
+  }
+
+  /** Any group or supergroup registers itself on first contact; one collection per chat. */
+  async function registerChat(chat) {
+    if (!chat || !GROUP_CHATS.has(chat.type) || !Number.isSafeInteger(chat.id) || chat.id >= 0) return null;
+    return (await store.getGroupByChat(chat.id)) || store.ensureGroup(groupIdOf(chat.id), chat.id, chat.title || 'Группа');
   }
 
   function acceptMembership(member) {
@@ -54,15 +56,18 @@ export function createAuth({ store, api, config }) {
     }
   }
 
-  async function requireMember(rawActor) {
+  async function requireMember(rawActor, groupId) {
     const actor = actorIdentity(rawActor);
-    const group = await resolveGroup();
+    const group = await resolveGroup(groupId);
     await requireBotCanAuthorize(group);
     try {
       const member = await api.getChatMember({ chat_id: group.chatId, user_id: actor.id });
-      if (!acceptMembership(member)) fail('ACCESS_DENIED', 'Доступ только для участников группы');
+      if (!acceptMembership(member)) {
+        await store.removeMember(group.id, actor.id);
+        fail('ACCESS_DENIED', 'Доступ только для участников группы');
+      }
     } catch (error) {
-      if (error?.code === 'ACCESS_DENIED' || error?.code === 'AUTH_UNAVAILABLE' || error?.code === 'CONFIG_REQUIRED') {
+      if (error?.code === 'ACCESS_DENIED' || error?.code === 'AUTH_UNAVAILABLE') {
         throw error;
       }
       if (isBotApiError(error)) {
@@ -70,12 +75,14 @@ export function createAuth({ store, api, config }) {
         // Telegram answers 400 "user not found" when the user is unknown to the chat:
         // a definite non-membership, unlike transient failures.
         if (error.code === 400 && (description.includes('user not found') || description.includes('participant'))) {
+          await store.removeMember(group.id, actor.id);
           fail('ACCESS_DENIED', 'Доступ только для участников группы');
         }
         fail('AUTH_UNAVAILABLE', 'Не удалось проверить участие в группе. Попробуйте позже');
       }
       throw error;
     }
+    await store.touchMember(group.id, actor.id, now());
     let title = group.title;
     try {
       const chat = await api.getChat({ chat_id: group.chatId });
@@ -89,14 +96,15 @@ export function createAuth({ store, api, config }) {
     return { actor, group: { id: group.id, chatId: group.chatId, title } };
   }
 
-  /** Private chats and the configured group both reach the same collection. */
-  async function requireConversation(chatId, rawActor) {
-    const auth = await requireMember(rawActor);
-    if (chatId === auth.group.chatId) return auth;
-    // Private chat with the bot: same shared collection after membership check.
-    if (typeof chatId === 'number' && chatId > 0) return auth;
-    fail('ACCESS_DENIED', 'Эта команда работает в настроенной группе или в личке с ботом');
+  /** The user's recently used groups, each re-verified live; failures are left out. */
+  async function userGroups(rawActor) {
+    const actor = actorIdentity(rawActor);
+    const known = await store.groupsOfUser(actor.id, PICKER_LIMIT);
+    const checked = await Promise.all(
+      known.map(group => requireMember(actor, group.id).then(auth => auth.group, () => null)),
+    );
+    return checked.filter(Boolean).map(group => ({ id: group.id, title: group.title }));
   }
 
-  return { resolveGroup, requireMember, requireConversation, acceptMembership };
+  return { resolveGroup, registerChat, requireMember, userGroups, acceptMembership };
 }
