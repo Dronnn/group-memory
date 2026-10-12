@@ -1,6 +1,7 @@
 import {parseCommand, parseId, conversationKey, topicOf, appLink, HELP, COMMANDS} from './commands.js';
 import {extractSnapshot} from './snapshot.js';
 import {createPanel,panelData} from './panel.js';
+import {hashtags,stripEdgeHashtags,sliceEntities,collectTags} from './hashtags.js';
 const PENDING_TTL = 10 * 60 * 1000;
 const CONFIRM_TTL = 5 * 60 * 1000;
 const SEARCH_TTL = 24 * 60 * 60 * 1000;
@@ -65,9 +66,20 @@ export function createBot({service,store,api,config,now = () => Date.now()}) {
     await put(key,{kind:'confirm',token},CONFIRM_TTL);
     return reply(message,`${operation === 'trash' ? 'Переместить в корзину' : 'Восстановить'} ${item.displayId || '#'+item.id} «${item.title}»?`,[[{text:operation === 'trash' ? 'В корзину' : 'Восстановить',callback_data:`c:${token}`}],[{text:'Отмена',callback_data:`x:${token}`}]]);
   }
-  async function save(message,actor,group,snapshotMessage,annotation,overrideText,requestId,key) {
+  const tagLine = tags => tags.map(tag => '#' + tag).join(' ');
+  async function save(message,actor,group,snapshotMessage,annotation,overrideText,requestId,key,extraTags = []) {
     const result = extractSnapshot(snapshotMessage,annotation,overrideText);
     if (result.error) return reply(message,result.error);
+    // Hashtags become tags. The saver's own text loses hashtags standing at its start or end;
+    // someone else's original message is never changed, only read for tags.
+    const snapshot = result.snapshot;
+    snapshot.tags = collectTags([...extraTags,...hashtags(snapshot.annotation),...hashtags(snapshot.body)],config.limits);
+    snapshot.annotation = stripEdgeHashtags(snapshot.annotation).text;
+    if (snapshotMessage === message) {
+      const kept = stripEdgeHashtags(snapshot.body);
+      snapshot.entities = sliceEntities(snapshot.entities,kept.start,kept.end);
+      snapshot.body = kept.text;
+    }
     const {item,duplicate} = await service.saveSnapshot(result.snapshot,actor,requestId,group);
     await del(key);
     if (duplicate && item.trashed) return confirm(message,actor,item,'restore',key,`${requestId}:restore`);
@@ -108,7 +120,8 @@ export function createBot({service,store,api,config,now = () => Date.now()}) {
   async function handle(message,actor,command,pending,group,requestId,key) {
     if (!command) {
       if (pending.kind === 'confirm') return;
-      if (pending.kind === 'remember') return save(message,actor,group,message,'',undefined,requestId,key);
+      if (pending.kind === 'remember') return save(message,actor,group,message,'',undefined,requestId,key,pending.tags);
+      if (pending.kind === 'tags') return setTags(message,actor,group,pending.id,pending.version,message.text,requestId,key);
       if (pending.kind === 'find') {
         if (!message.text?.trim()) return prompt(message,'Пришлите поисковый запрос текстом или /cancel.');
         await service.authorize(actor,group);
@@ -150,14 +163,25 @@ export function createBot({service,store,api,config,now = () => Date.now()}) {
     if (action === 'remember') {
       if (message.external_reply && !message.reply_to_message) return reply(message,'Исходное сообщение из внешнего ответа недоступно. Перешлите его текст, фотографию или документ сюда.');
       if (message.reply_to_message) return save(message,actor,group,message.reply_to_message,args,undefined,requestId,key);
-      if (args) return save(message,actor,group,message,'',args,requestId,key);
-      await put(key,{kind:'remember',group});
-      return prompt(message,'Пришлите текст, фотографию или документ ответом на это сообщение в течение 10 минут. /cancel — отменить.');
+      // Only hashtags: wait for the content and tag it.
+      const tags = stripEdgeHashtags(args).text ? [] : collectTags(hashtags(args),config.limits);
+      if (args && !tags.length) return save(message,actor,group,message,'',args,requestId,key);
+      await put(key,{kind:'remember',group,tags});
+      return prompt(message,`Пришлите текст, фотографию или документ ответом на это сообщение в течение 10 минут${tags.length ? ` — сохраню с тегами ${tagLine(tags)}` : ''}. /cancel — отменить.`);
     }
     if (action === 'find' && !args) { await put(key,{kind:'find',group}); return prompt(message,'Что найти? Пришлите запрос ответом на это сообщение в течение 10 минут или /cancel.'); }
     if (action === 'find') return showSearch(message,actor,group,args);
     if (action === 'recent') return show(message,await panel.recent(actor,group));
     if (action === 'tags') return show(message,await panel.tags(actor,group));
+    if (action === 'tag') {
+      const [idText = '',...rest] = args.split(/\s+/);
+      const id = parseId(idText);
+      if (!id) return reply(message,'Укажите ID записи и теги: /tag 12 #деплой #правила');
+      const item = await service.execute('read',{group,id},actor);
+      if (rest.length) return setTags(message,actor,group,item.id,item.version,rest.join(' '),requestId,key);
+      await put(key,{kind:'tags',group,id:item.id,version:item.version});
+      return prompt(message,tagsPrompt(item));
+    }
     if (['edit','forget','restore'].includes(action)) {
       const id = parseId(args);
       if (!id) return reply(message,`Укажите ID записи: /${action} 12`);
@@ -171,6 +195,15 @@ export function createBot({service,store,api,config,now = () => Date.now()}) {
       if (action === 'forget' && item.trashed) return sendItem(message,item,'Запись уже в корзине');
       return confirm(message,actor,item,action === 'forget' ? 'trash' : 'restore',key,requestId);
     }
+  }
+  const tagsPrompt = item => `Пришлите хэштеги для ${item.displayId || 'M-'+item.id} ответом на это сообщение, например #деплой #правила. Они заменят текущие теги${item.tags?.length ? ` (${tagLine(item.tags)})` : ''}. «-» — убрать все теги, /cancel — отменить.`;
+  async function setTags(message,actor,group,id,version,text,requestId,key) {
+    const value = String(text || '').trim();
+    const tags = value === '-' ? [] : collectTags(hashtags(value),config.limits);
+    if (value !== '-' && !tags.length) return prompt(message,'Не нашёл хэштегов. Пришлите теги вида #деплой #правила, «-» чтобы убрать все, или /cancel.');
+    const result = await service.execute('update',{group,id,expectedVersion:version,requestId,tags},actor);
+    await del(key);
+    return sendItem(message,result.item,tags.length ? `Теги: ${tagLine(tags)}` : 'Теги убраны');
   }
   // Group chosen for a private-chat command: replay the stored command against it.
   async function chosen(query,actor,answer) {
@@ -224,6 +257,10 @@ export function createBot({service,store,api,config,now = () => Date.now()}) {
       } else if (view === 's') result = await ask({kind:'find'},'Что найти? Ответьте на это сообщение текстом запроса.');
       else if (view === 'a') result = await ask({kind:'remember'},'Ответьте на это сообщение текстом, фотографией или документом — сохраню в память.');
       else if (view === 'e') result = await ask({kind:'edit',id:num(0),version:num(1)},`Ответьте на это сообщение новым текстом для M-${num(0)}. Источник и история сохранятся.`);
+      else if (view === 'k') {
+        const item = await service.execute('read',{group,id:num(0)},actor);
+        result = await ask({kind:'tags',id:item.id,version:item.version},tagsPrompt(item).replace(' ответом на это сообщение',', ответив на это сообщение'));
+      }
       else return answer('Недействительная кнопка');
       await edit(message,result);
       await api.answerCallbackQuery({callback_query_id:query.id});

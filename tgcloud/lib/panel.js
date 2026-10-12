@@ -53,7 +53,7 @@ export function createPanel({ service, username }) {
 
   async function tags(actor, group) {
     const { tags: all } = await service.execute('tags', { group }, actor);
-    if (!all.length) return { text: 'Тегов пока нет. Теги добавляются в приложении.', keyboard: [[menuButton(group)]] };
+    if (!all.length) return { text: 'Тегов пока нет. Добавьте хэштег при сохранении: /remember текст #тег', keyboard: [[menuButton(group)]] };
     const shown = all.slice(0, TAGS_SHOWN);
     const rows = [];
     for (let i = 0; i < shown.length; i += 2) {
@@ -92,6 +92,7 @@ export function createPanel({ service, username }) {
         ? [{ text: 'Восстановить', callback_data: panelData(group, 'R', item.id, item.version) }]
         : [
             { text: 'Изменить', callback_data: panelData(group, 'e', item.id, item.version) },
+            { text: 'Теги', callback_data: panelData(group, 'k', item.id) },
             { text: 'В корзину', callback_data: panelData(group, 'd', item.id, item.version) },
           ],
     ];

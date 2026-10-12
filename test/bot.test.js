@@ -390,7 +390,7 @@ test('/memory opens a panel that navigates in place', async () => {
   const card = lastEdit(api);
   assert.match(card.text, /подробности здесь/);
   assert.match(card.text, /Сохранил\(а\): Анна/);
-  assert.deepEqual(card.reply_markup.inline_keyboard.flat().map(button => button.text), ['Изменить', 'В корзину', 'Открыть в приложении', 'Меню']);
+  assert.deepEqual(card.reply_markup.inline_keyboard.flat().map(button => button.text), ['Изменить', 'Теги', 'В корзину', 'Открыть в приложении', 'Меню']);
 
   await press(bot, anna, panel, buttonData(card, 'Меню'));
   assert.match(lastEdit(api).text, /Память группы/);
@@ -520,4 +520,80 @@ test('a reply thread in an ordinary supergroup still completes pending input', a
   await bot.message(msg({ text: '/remember' }), ctx(1));
   await bot.message(msg({ message_id: 501, text: 'Ответ в ветке', message_thread_id: 500 }), ctx(2));
   assert.equal((await items(store))[0].data.current.body, 'Ответ в ветке');
+});
+
+const current = async store => (await items(store))[0].data.current;
+
+test('hashtags at the edges of own text become tags and leave the text', async () => {
+  const { bot, store } = setupBot();
+  await bot.message(msg({ text: '/remember #деплой Деплой по пятницам #Правила #CI_CD' }), ctx(1));
+  const saved = await current(store);
+  assert.equal(saved.body, 'Деплой по пятницам');
+  assert.equal(saved.title, 'Деплой по пятницам');
+  assert.deepEqual(saved.tags, ['деплой', 'правила', 'ci_cd']);
+});
+
+test('a hashtag inside the text stays there and is also a tag', async () => {
+  const { bot, store } = setupBot();
+  await bot.message(msg({ text: '/remember Для #деплой нужен доступ #срочно' }), ctx(1));
+  const saved = await current(store);
+  assert.equal(saved.body, 'Для #деплой нужен доступ');
+  assert.deepEqual(saved.tags, ['деплой', 'срочно']);
+});
+
+test('the original message keeps its hashtags; command hashtags are tags, not an annotation', async () => {
+  const { bot, store } = setupBot();
+  const source = msg({ message_id: 10, from: igor, text: '#вакансия Ищем айос разработчика' });
+  await bot.message(msg({ text: '/save #важное', reply_to_message: source }), ctx(1));
+  const saved = await current(store);
+  assert.equal(saved.body, '#вакансия Ищем айос разработчика');
+  assert.equal(saved.annotation, '');
+  assert.deepEqual(saved.tags, ['важное', 'вакансия']);
+});
+
+test('/remember with only hashtags waits for content and tags it', async () => {
+  const { bot, api, store } = setupBot();
+  await bot.message(msg({ text: '/remember #рецепт' }), ctx(1));
+  assert.match(last(api).text, /с тегами #рецепт/);
+  await bot.message(msg({ message_id: 501, text: 'Борщ по-домашнему', entities: [{ type: 'bold', offset: 0, length: 4 }] }), ctx(2));
+  const saved = await current(store);
+  assert.equal(saved.body, 'Борщ по-домашнему');
+  assert.deepEqual(saved.tags, ['рецепт']);
+});
+
+test('formatting survives cutting edge hashtags from pending input', async () => {
+  const { bot, store } = setupBot();
+  await bot.message(msg({ text: '/remember' }), ctx(1));
+  await bot.message(msg({ message_id: 501, text: '#код Пример цикла', entities: [{ type: 'hashtag', offset: 0, length: 4 }, { type: 'bold', offset: 5, length: 6 }] }), ctx(2));
+  const saved = await current(store);
+  assert.equal(saved.body, 'Пример цикла');
+  assert.deepEqual(saved.entities, [{ type: 'bold', offset: 0, length: 6 }]);
+});
+
+test('/tag replaces tags; the card button asks for a reply', async () => {
+  const { bot, api, store } = setupBot();
+  await bot.message(msg({ text: '/remember Заметка #старое' }), ctx(1));
+  await bot.message(msg({ message_id: 501, text: '/tag 1 #новое #ещё' }), ctx(2));
+  assert.deepEqual((await current(store)).tags, ['новое', 'ещё']);
+  assert.match(last(api).text, /^Теги: #новое #ещё/);
+  await bot.message(msg({ message_id: 502, text: '/tag 1 -' }), ctx(3));
+  assert.deepEqual((await current(store)).tags, []);
+
+  await bot.message(msg({ message_id: 503, text: '/show 1' }), ctx(4));
+  const panel = panelOf(api);
+  await press(bot, anna, panel, buttonData(last(api), 'Теги'));
+  assert.match(lastEdit(api).text, /Пришлите хэштеги для M-1/);
+  await bot.message(msg({ message_id: 504, text: 'без тегов' }), ctx(5));
+  assert.match(last(api).text, /Не нашёл хэштегов/);
+  await bot.message(msg({ message_id: 505, text: '#финал' }), ctx(6));
+  assert.deepEqual((await current(store)).tags, ['финал']);
+});
+
+test('too many or too long hashtags are capped, never fail the save', async () => {
+  const { bot, store } = setupBot();
+  const many = Array.from({ length: 12 }, (_, i) => `#тег${i}`).join(' ');
+  await bot.message(msg({ text: `/remember Текст ${many} #${'д'.repeat(31)}` }), ctx(1));
+  const saved = await current(store);
+  assert.equal(saved.body, 'Текст');
+  assert.equal(saved.tags.length, 10);
 });

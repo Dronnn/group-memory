@@ -1,5 +1,5 @@
 // Deliberate capture only. No fuzzy matching or passive message ingestion.
-const commands = new Set(['start','help','remember','save','memory','show','find','recent','tags','edit','forget','restore','cancel']);
+const commands = new Set(['start','help','remember','save','memory','show','tag','find','recent','tags','edit','forget','restore','cancel']);
 export function parseCommand(text, botUsername) {
   if (typeof text !== 'string') return null;
   const name = String(botUsername || '').replace(/^@/, '').toLowerCase();
@@ -36,6 +36,7 @@ export const COMMANDS = [
   { command: 'memory', description: 'Меню памяти с кнопками' },
   { command: 'show', description: 'Показать запись по ID' },
   { command: 'find', description: 'Найти по запросу' },
+  { command: 'tag', description: 'Задать теги записи: /tag ID #тег' },
   { command: 'recent', description: 'Последние записи' },
   { command: 'tags', description: 'Теги и просмотр' },
   { command: 'edit', description: 'Изменить запись по ID' },
@@ -43,4 +44,4 @@ export const COMMANDS = [
   { command: 'restore', description: 'Восстановить запись из корзины' },
   { command: 'cancel', description: 'Отменить ввод' },
 ];
-export const HELP = 'Общая память группы\n\n/memory — меню с кнопками: последние, поиск, теги, корзина\n/remember текст — сохранить заметку\n/save в ответ на сообщение — сохранить выбранное сообщение; текст команды станет примечанием\n/show ID — показать запись целиком\n/find запрос — поиск\n/recent — последние записи\n/tags — теги\n/edit ID — изменить текст\n/forget ID — в корзину после подтверждения\n/restore ID — восстановить\n/cancel — отменить ввод\n\nМожно адресовать мне: @БОТ запомни текст, @БОТ найди запрос, @БОТ память. Обычную переписку я не сохраняю.';
+export const HELP = 'Общая память группы\n\n/memory — меню с кнопками: последние, поиск, теги, корзина\n/remember текст #тег — сохранить заметку; хэштеги станут тегами\n/save в ответ на сообщение — сохранить выбранное сообщение; текст команды станет примечанием\n/show ID — показать запись целиком\n/find запрос — поиск\n/recent — последние записи\n/tags — теги\n/tag ID #тег — заменить теги записи\n/edit ID — изменить текст\n/forget ID — в корзину после подтверждения\n/restore ID — восстановить\n/cancel — отменить ввод\n\nМожно адресовать мне: @БОТ запомни текст, @БОТ найди запрос, @БОТ память. Обычную переписку я не сохраняю.';

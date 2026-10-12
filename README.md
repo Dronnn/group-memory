@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.frontend.json)
-[![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)](test)
+[![Tests](https://img.shields.io/badge/tests-94%20passing-brightgreen)](test)
 
 **A shared memory for Telegram groups.** The good stuff in a busy chat — explanations, code
 snippets, links, decisions, screenshots — usually drowns in the scrollback. Group Memory gives every
@@ -18,6 +18,10 @@ React + TypeScript Mini App in `src/`, no servers to run and no npm packages in 
 - Reply `/remember` in the chat to snapshot exactly that message — text, formatting, code blocks,
   links, one photo or one document, with the original author attached as attribution.
 - `/remember <текст>` for a standalone note, or the addressed shortcut `@yourbot запомни <текст>`.
+- Hashtags become tags: from the command text and from the saved message. Hashtags standing at the
+  start or end of your own text are cut from it (`/remember Деплой по пятницам #деплой`); ones
+  inside the text stay. The original message is never changed. `/remember #тег` alone waits for
+  the content; `/tag ID #a #b` or the card's «Теги» button replaces tags later.
 - A full editor in the Mini App: title, multiline body, annotation, tags, URL — with a
   deterministic auto-title you can edit.
 - Nothing else is ever archived. Ordinary conversation is not read, indexed or sent anywhere, and
@@ -101,7 +105,7 @@ Mini App ──POST /api/memory (initData)──▶ endpoints/memory.js ┘     
 | `tgcloud/handlers/` | `message`, `callback_query`, `my_chat_member` update handlers |
 | `tgcloud/endpoints/memory.js` | Mini App RPC facade (`POST /api/memory`); identity only from `ctx.initData` |
 | `src/` | Mini App: `App.tsx`, transport (`api.ts`), components, styles, dev-only fixture transport |
-| `test/` | Node test-runner suites: service, bot flows, units — 86 tests |
+| `test/` | Node test-runner suites: service, bot flows, units — 94 tests |
 | `docs/contracts.md` | The RPC contract between the Mini App and the backend |
 | `docs/tgcloud-sdk.md` | Telegram Serverless SDK reference used by this project |
 | `docs/group-guide-ru.md` | A short Russian user guide, ready to post in the group |
@@ -111,7 +115,7 @@ Mini App ──POST /api/memory (initData)──▶ endpoints/memory.js ┘     
 ```bash
 npm install
 npm run dev        # Vite dev server with the dev-only fixture transport
-npm test           # 86 tests
+npm test           # 94 tests
 npm run typecheck  # strict TypeScript over src/
 npm run build      # typecheck + production bundle into dist/
 ```
@@ -164,6 +168,7 @@ prints the Mini App URL (`https://app<app_id>.tgcloud.ai/`); `/api/*` is reserve
    remember - Сохранить текст или выбранное сообщение
    memory - Меню памяти с кнопками
    show - Показать запись по ID
+   tag - Задать теги записи: /tag ID #тег
    find - Найти по запросу
    recent - Последние записи
    tags - Теги и просмотр
@@ -215,7 +220,7 @@ in the Mini App bundle, or in logs.
 
 ## Testing
 
-`npm test` runs 86 tests on the Node test runner with an in-memory store and a fake Bot API:
+`npm test` runs 94 tests on the Node test runner with an in-memory store and a fake Bot API:
 
 - authorization matrix (creator/administrator/member, restricted + `is_member`, left/kicked),
   membership re-checks without caching, fail-closed behavior, bot-removal suspension;

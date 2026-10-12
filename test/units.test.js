@@ -12,6 +12,7 @@ import {
 } from '../tgcloud/lib/validation.js';
 import { appLink, conversationKey, parseCommand, parseId } from '../tgcloud/lib/commands.js';
 import { extractSnapshot, safeUrl } from '../tgcloud/lib/snapshot.js';
+import { hashtags, stripEdgeHashtags } from '../tgcloud/lib/hashtags.js';
 import { exportMemory, inferType, publicMemory } from '../tgcloud/lib/public.js';
 import { config } from '../tgcloud/lib/config.js';
 
@@ -260,4 +261,13 @@ test('inferType picks the content type', () => {
   assert.equal(inferType({ body: 'x', url: 'https://example.com' }), 'link');
   assert.equal(inferType({ body: 'x', attachment: { kind: 'photo' } }), 'photo');
   assert.equal(inferType({ body: 'x', attachment: { kind: 'document' } }), 'document');
+});
+
+test('hashtag parsing follows Telegram rules', () => {
+  assert.deepEqual(hashtags('#a1 текст#нет #123 #ок_да, email@x.ru #'), ['a1', 'ок_да']);
+  assert.deepEqual(stripEdgeHashtags('#a #b\nтекст #c и\n#d #e'), { text: 'текст #c и', start: 6, end: 16 });
+  assert.equal(stripEdgeHashtags('текст #c\n#d').text, 'текст');
+  assert.equal(stripEdgeHashtags('#a #b').text, '');
+  assert.equal(stripEdgeHashtags('просто текст').text, 'просто текст');
+  assert.equal(stripEdgeHashtags('#123 текст').text, '#123 текст');
 });
