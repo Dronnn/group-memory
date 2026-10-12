@@ -1,0 +1,28 @@
+{
+  "name": "group-memory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "VITE_DEV_FIXTURE=1 vite",
+    "build": "tsc -p tsconfig.frontend.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.frontend.json --noEmit",
+    "test": "node --test test/*.test.js",
+    "deploy": "npm run build && tgcloud push",
+    "status": "tgcloud status",
+    "migrate": "tgcloud migrate",
+    "run": "tgcloud run"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tgcloud/cli": "^0.2.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10"
+  }
+}

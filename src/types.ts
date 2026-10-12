@@ -1,0 +1,10 @@
+export type Person = { id: number; name: string };
+export type Entity = { type: string; offset: number; length: number; url?: string; language?: string };
+export type Memory = { id: number; displayId: string; groupId: string; title: string; body: string; annotation: string; url: string; tags: string[]; type: 'text'|'link'|'photo'|'document'; pinned: boolean; creator: Person; editor: Person; createdAt: number; updatedAt: number; version: number; trashed: boolean; deletedBy?: Person; source?: {messageId:number;chatId:string;date:number;authorName:string;authorId?:number;topicId?:number;url?:string}; attachment?: {kind:'photo'|'document';fileName?:string;mimeType?:string;size?:number;width?:number;height?:number;available?:boolean}; entities?:Entity[] };
+export type Revision = {version:number;editor:Person;at:number;event:string;snapshot:Memory};
+export type Bootstrap = {group:{id:string;title:string};actor:Person;botUsername:string;limits:Record<string,number>};
+export type Page<T> = {items:T[];nextCursor:string|null};
+export type Filters = {query:string;tag:string;type:string;view:'active'|'pinned'|'trash';savedByMe:boolean;sort:'newest'|'oldest'|'updated'};
+export type Draft = {title:string;body:string;annotation:string;tags:string;url:string};
+export interface TelegramApp {initData?:string;initDataUnsafe?:{start_param?:string};colorScheme?:'light'|'dark';themeParams?:Record<string,string>;Serverless?:{call:(name:string,input:Record<string,unknown>,callback:(error: {message?:string;type?:string;parameters?:Record<string,unknown>}|null,result:any)=>void)=>void};ready?:()=>void;expand?:()=>void;onEvent?:(event:string,callback:()=>void)=>void;offEvent?:(event:string,callback:()=>void)=>void;enableClosingConfirmation?:()=>void;disableClosingConfirmation?:()=>void;openTelegramLink?:(url:string)=>void;BackButton?:{show:()=>void;hide:()=>void;onClick:(cb:()=>void)=>void;offClick:(cb:()=>void)=>void};HapticFeedback?:{notificationOccurred:(type:'success'|'error'|'warning')=>void}}
+declare global {interface Window {Telegram?:{WebApp?:TelegramApp}}}

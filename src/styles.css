@@ -1,0 +1,247 @@
+:root {
+  color-scheme: light dark;
+  --bg: var(--tg-theme-bg-color, #f3f1ec);
+  --bg-elevated: var(--tg-theme-secondary-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #1c1915);
+  --muted: var(--tg-theme-hint-color, #746c63);
+  --link: var(--tg-theme-link-color, #0b6e4f);
+  --button: var(--tg-theme-button-color, #0b6e4f);
+  --button-text: var(--tg-theme-button-text-color, #ffffff);
+  --danger: #b42318;
+  --border: color-mix(in srgb, var(--muted) 28%, transparent);
+  --shadow: 0 10px 30px color-mix(in srgb, #1c1915 8%, transparent);
+  --radius: 18px;
+  --font: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--button) 12%, transparent), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 70%, var(--bg)), var(--bg));
+  color: var(--text);
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--link); }
+
+.app {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: calc(12px + var(--safe-top)) 14px calc(24px + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topbar, .toolbar, .filters, .item, .panel, .empty, .banner, .composer {
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  animation: rise .35s ease both;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.brand strong {
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand span, .meta, .muted { color: var(--muted); font-size: .9rem; }
+
+.icon-btn, .btn, .chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 999px;
+  min-height: 42px;
+  padding: 0 14px;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.icon-btn { width: 42px; padding: 0; }
+.icon-btn:active, .btn:active, .chip:active, .item:active { transform: scale(.98); }
+.btn.primary, .chip.active {
+  background: var(--button);
+  color: var(--button-text);
+  border-color: transparent;
+}
+.btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.btn:disabled, .icon-btn:disabled { opacity: .55; cursor: default; }
+
+.toolbar, .filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+.search {
+  flex: 1 1 180px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+}
+.search input, .field input, .field textarea {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 10px 0;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field label { font-size: .86rem; color: var(--muted); }
+.field-box, .code-block, .history-item {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  padding: 12px 14px;
+}
+.field textarea { min-height: 160px; resize: vertical; line-height: 1.45; }
+.field .error { color: var(--danger); font-size: .84rem; }
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.item {
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: rise .4s ease both;
+}
+.item-top, .row, .actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.item h2, .panel h1, .panel h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.excerpt {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--button) 12%, transparent);
+  color: var(--link);
+  font-size: .82rem;
+}
+.type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow);
+  animation: rise .35s ease both;
+}
+.body {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 1rem;
+}
+.code-block {
+  position: relative;
+  font-family: var(--mono);
+  font-size: .92rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+.code-block .copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.empty, .banner {
+  padding: 22px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.banner.error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.composer { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.actions { justify-content: flex-start; }
+.spacer { flex: 1; }
+.skeleton {
+  height: 92px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--muted) 18%, transparent), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (min-width: 720px) {
+  .app { padding-top: 24px; }
+  .item h2, .panel h1 { font-size: 1.2rem; }
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.tgcloud/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.vite/
+*.local
+
+# Local working notes and internal documents (kept on disk, not published)
+PROMPT.md
+AGENTS.md
+HANDOFF.md
+docs/plan.md
+docs/platform-verification.md
+logs/
